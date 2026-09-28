@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ODD HAUS — Interactive 3D v2</title>
+<style>
+:root{--bg:#f5f4f1;--panel:#fff;--text:#1f1f1f;--muted:#6f6f6f;--border:#ddd8d2;--accent:#1f1f1f}
+*{box-sizing:border-box} body{margin:0;font-family:Arial,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;background:var(--bg);color:var(--text)}
+.wrap{width:min(1440px,96vw);margin:0 auto;padding:24px 0 32px}
+.top{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
+.title{font-size:18px;font-weight:700}.sub{margin-top:6px;font-size:13px;color:var(--muted);line-height:1.5}
+.controls,.bottom{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button{appearance:none;border:1px solid var(--border);background:#fff;padding:9px 13px;border-radius:999px;font-size:12px;cursor:pointer;color:var(--text)}
+button:hover{background:#f1efeb} .primary{background:var(--accent);border-color:var(--accent);color:#fff} .primary:hover{background:#353535}
+.stage-wrap{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:18px;background:#13110f;aspect-ratio:16/10;min-height:560px}
+#stage{position:absolute;inset:0} canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab} canvas:active{cursor:grabbing}
+.badge,.hint{position:absolute;border-radius:999px;padding:7px 10px;background:rgba(0,0,0,.52);backdrop-filter:blur(8px);color:rgba(255,255,255,.84);font-size:10px;pointer-events:none}
+.badge{left:14px;top:14px;letter-spacing:.16em}.hint{left:50%;bottom:14px;transform:translateX(-50%);white-space:nowrap}
+#loading,#fail{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#13110f;color:rgba(255,255,255,.78);z-index:2;text-align:center;padding:30px;font-size:14px}
+#fail{display:none}.bottom{margin-top:12px}.status{font-size:12px;color:var(--muted);margin-left:4px}.note{margin-top:10px;font-size:12px;color:var(--muted);line-height:1.65}
+.label{position:absolute;transform:translate(-50%,-50%);padding:5px 8px;border-radius:999px;background:rgba(12,10,9,.75);border:1px solid rgba(255,255,255,.15);color:#fff;font-size:10px;letter-spacing:.08em;white-space:nowrap;pointer-events:none;backdrop-filter:blur(6px)}
+@media (max-width:720px){.stage-wrap{min-height:440px;aspect-ratio:4/5}.hint{font-size:9px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <div class="title">ODD HAUS · REFINED 3D MODEL v2</div>
+      <div class="sub">배치 수정 버전 — 중앙축 정렬 / 쇼파 가운데 정렬 / 오른쪽 스튜디오 확장 / 서재 동선 확보</div>
+    </div>
+    <div class="controls">
+      <button class="primary" data-view="all">전체</button>
+      <button data-view="dj">DJ</button>
+      <button data-view="lounge">라운지</button>
+      <button data-view="studio">스튜디오</button>
+      <button data-view="library">LP룸</button>
+      <button data-view="terrace">테라스</button>
+    </div>
+  </div>
+
+  <div class="stage-wrap">
+    <div id="stage"></div>
+    <div class="badge">ODD HAUS · LAYOUT REVISION V2</div>
+    <div class="hint">DRAG TO ROTATE · WHEEL TO ZOOM</div>
+    <div id="loading">개선된 3D 버전을 렌더링하는 중…</div>
+    <div id="fail">3D 모듈을 불러오지 못했습니다. 인터넷 연결 상태를 확인한 뒤 다시 열어주세요.</div>
+  </div>
+
+  <div class="bottom">
+    <button id="labelToggle">공간명 표시</button>
+    <button id="topView">평면 보기</button>
+    <button id="resetView">초기 시점</button>
+    <span class="status" id="status">전체 공간</span>
+  </div>
+
+  <div class="note">
+    <strong>v2 수정 포인트:</strong> DJ 부스–커피테이블–쇼파를 한 중심축으로 정렬했고, 오른쪽 작업실은 더 넓고 깊게 확장했으며, 뒤쪽 LP 라이브러리와 커뮤니티 테이블 사이 통로를 더 넓게 확보했습니다. 식물 배치도 가장자리 위주로 정리했습니다.
+  </div>
+</div>
+
+<script type="module">
+(async()=>{
+ const mount=document.getElementById('stage'), load=document.getElementById('loading'), fail=document.getElementById('fail'), status=document.getElementById('status');
+ try{
+  const THREE=await import('https://cdn.jsdelivr.net/npm/three@0.167.1/+esm');
+  const {OrbitControls}=await import('https://cdn.jsdelivr.net/npm/three@0.167.1/examples/jsm/controls/OrbitControls.js/+esm');
+  const {RoundedBoxGeometry}=await import('https://cdn.jsdelivr.net/npm/three@0.167.1/examples/jsm/geometries/RoundedBoxGeometry.js/+esm');
+  const {RoomEnvironment}=await import('https://cdn.jsdelivr.net/npm/three@0.167.1/examples/jsm/environments/RoomEnvironment.js/+esm');
+
+  const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.outputColorSpace=THREE.SRGBColorSpace;
+  renderer.toneMapping=THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure=1.12;
+  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  mount.appendChild(renderer.domElement);
+
+  const scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x15120f);
+  scene.fog=new THREE.Fog(0x15120f,38,66);
+  const pmrem=new THREE.PMREMGenerator(renderer);
+  scene.environment=pmrem.fromScene(new RoomEnvironment(renderer),.05).texture;
+
+  const camera=new THREE.PerspectiveCamera(38,1,.1,180);
+  camera.position.set(20,15.2,28);
+  const controls=new OrbitControls(camera,renderer.domElement);
+  controls.target.set(0,1.5,1.3);
+  controls.enableDamping=true; controls.dampingFactor=.055; controls.enablePan=false;
+  controls.minDistance=7; controls.maxDistance=40; controls.minPolarAngle=.35; controls.maxPolarAngle=1.45;
+  controls.minAzimuthAngle=-1.45; controls.maxAzimuthAngle=1.45;
+
+  function tex(draw,w=1024,h=1024){const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');draw(x,w,h);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;return t}
+  const wood=tex((x,w,h)=>{x.fillStyle='#714121';x.fillRect(0,0,w,h);for(let i=0;i<220;i++){const y=(i*31)%h;x.beginPath();x.strokeStyle='rgba(40,16,7,'+(.028+(i%7)*.007)+')';x.lineWidth=.5+(i%4)*.3;for(let p=0;p<=w;p+=20){const yy=y+Math.sin(p*.014+i*.48)*3.6+Math.sin(p*.04+i*.11)*1.2;p?x.lineTo(p,yy):x.moveTo(p,yy)}x.stroke()}for(let i=0;i<30;i++){x.fillStyle='rgba(20,8,4,.05)';x.beginPath();x.ellipse((i*81)%w,(i*137)%h,26,7,.1,0,Math.PI*2);x.fill()}}); wood.wrapS=wood.wrapT=THREE.RepeatWrapping; wood.repeat.set(3,3);
+  const fabric=tex((x,w,h)=>{x.fillStyle='#173860';x.fillRect(0,0,w,h);for(let y=0;y<h;y+=5){x.strokeStyle='rgba(255,255,255,.017)';x.beginPath();x.moveTo(0,y);x.lineTo(w,y);x.stroke()}for(let z=0;z<w;z+=7){x.strokeStyle='rgba(0,0,0,.02)';x.beginPath();x.moveTo(z,0);x.lineTo(z,h);x.stroke()}}); fabric.wrapS=fabric.wrapT=THREE.RepeatWrapping; fabric.repeat.set(4,4);
+  const rug=tex((x,w,h)=>{x.fillStyle='#7f3528';x.fillRect(0,0,w,h);x.strokeStyle='#d2a471';x.lineWidth=18;x.strokeRect(28,28,w-56,h-56);x.strokeStyle='#18314c';x.lineWidth=8;x.strokeRect(58,58,w-116,h-116);for(let a=120;a<w;a+=116){for(let b=120;b<h;b+=116){x.beginPath();x.arc(a,b,28,0,Math.PI*2);x.stroke();x.beginPath();x.moveTo(a-36,b);x.lineTo(a,b-36);x.lineTo(a+36,b);x.lineTo(a,b+36);x.closePath();x.stroke()}}}); rug.wrapS=rug.wrapT=THREE.RepeatWrapping; rug.repeat.set(1.6,1.1);
+  const stone=tex((x,w,h)=>{x.fillStyle='#b8a48d';x.fillRect(0,0,w,h);x.strokeStyle='rgba(75,55,40,.20)';x.lineWidth=3;const s=140;for(let yy=0;yy<h;yy+=s){const off=((yy/s)%2)*70;for(let xx=-150;xx<w+150;xx+=140)x.strokeRect(xx+off,yy,140,140)}}); stone.wrapS=stone.wrapT=THREE.RepeatWrapping; stone.repeat.set(3,3);
+
+  const M={
+   plaster:new THREE.MeshStandardMaterial({color:0xe0d1bf,roughness:.96}),
+   floor:new THREE.MeshStandardMaterial({color:0xbc9f7f,roughness:.74}),
+   stone:new THREE.MeshStandardMaterial({map:stone,roughness:.88}),
+   wood:new THREE.MeshStandardMaterial({map:wood,roughness:.48}),
+   wood2:new THREE.MeshStandardMaterial({map:wood,color:0x9c7658,roughness:.56}),
+   navy:new THREE.MeshStandardMaterial({color:0x102e4d,roughness:.34}),
+   velvet:new THREE.MeshStandardMaterial({map:fabric,roughness:.94}),
+   cream:new THREE.MeshStandardMaterial({color:0xe4d9ca,roughness:.96}),
+   black:new THREE.MeshStandardMaterial({color:0x0d0d0c,roughness:.28,metalness:.16}),
+   brass:new THREE.MeshStandardMaterial({color:0xb07a43,roughness:.26,metalness:.74}),
+   steel:new THREE.MeshStandardMaterial({color:0xbab9b3,roughness:.24,metalness:.85}),
+   rug:new THREE.MeshStandardMaterial({map:rug,roughness:.96}),
+   glass:new THREE.MeshPhysicalMaterial({color:0xe9efec,roughness:.04,transmission:.95,transparent:true,opacity:.22,thickness:.05}),
+   leaf1:new THREE.MeshStandardMaterial({color:0x375f3c,roughness:.82,side:THREE.DoubleSide}),
+   leaf2:new THREE.MeshStandardMaterial({color:0x55764b,roughness:.84,side:THREE.DoubleSide}),
+   trunk:new THREE.MeshStandardMaterial({color:0x73523a,roughness:.92}),
+   pot:new THREE.MeshStandardMaterial({color:0x8a6249,roughness:.95}),
+   amber:new THREE.MeshPhysicalMaterial({color:0x6d2f13,roughness:.14,clearcoat:1,clearcoatRoughness:.12,transmission:.12})
+  };
+
+  const box=(x,y,z,w,h,d,m,r=.04,p=scene)=>{const o=new THREE.Mesh(new RoundedBoxGeometry(w,h,d,3,r),m);o.position.set(x,y,z);o.castShadow=true;o.receiveShadow=true;p.add(o);return o};
+  const group=(x=0,y=0,z=0)=>{const g=new THREE.Group();g.position.set(x,y,z);scene.add(g);return g};
+
+  // Overall shell — slightly wider and deeper for better proportions
+  box(0,-.15,1,28,.3,21,M.floor,.02);
+  box(0,3.1,-9.3,28,6.2,.22,M.plaster,.02);
+  box(-13.9,3.1,-7.1,.22,6.2,5.2,M.plaster,.02);
+  box(13.9,3.1,-7.1,.22,6.2,5.2,M.plaster,.02);
+
+  // Terrace / left glazing
+  box(-11.35,.01,2.8,5.2,.08,12.5,M.stone,.01);
+  box(-8.75,2.58,2.35,.06,5.1,10.6,M.glass,.004);
+  for(let z=-2.4;z<=6.8;z+=3)box(-8.7,2.58,z,.12,5.15,.1,M.black,.008);
+  box(-11.5,.46,4.8,2.8,.13,.8,M.wood2,.04);
+  box(-11.0,.76,1.5,1.25,.1,1.25,M.wood2,.04);
+
+  // DJ zone — strict center axis
+  box(0,2.82,-9.02,11.5,5.22,.25,M.wood,.02);
+  box(0,2.84,-8.82,7.15,4.75,.1,M.navy,.01);
+  box(0,1.18,-7.15,8.25,2.35,1.18,M.wood,.10);
+  box(0,1.21,-6.52,5.7,1.78,.065,M.navy,.008);
+  for(let x=-2.68;x<=2.68;x+=.32) box(x,1.21,-6.48,.014,1.70,.02,M.brass,.001);
+  for(let y=.47;y<=1.98;y+=.27) box(0,y,-6.47,5.55,.014,.02,M.brass,.001);
+  function sideShelf(x,w=2.55,z=-8.33){const q=group(x,2.6,z);box(0,0,0,w,5.15,.69,M.wood,.03,q);box(0,0,.37,w-.2,4.9,.07,M.wood2,.01,q);for(let yy=-1.84;yy<=1.84;yy+=.90)box(0,yy,.40,w-.2,.075,.72,M.wood2,.01,q);for(let i=0;i<15;i++){const xx=-(w*.29)+(i%3)*(w*.29),yy=-1.48+(Math.floor(i/3)%4)*.90;box(xx,yy,.44,.11,.60,.36,new THREE.MeshStandardMaterial({color:[0x493d34,0x84644a,0x394952,0x76503d][i%4],roughness:.9}),.01,q)}}
+  sideShelf(-4.25,2.55); sideShelf(4.25,2.55);
+  function speaker(x){const q=group(x,3.03,-7.88);box(0,0,0,1.48,3.22,.78,M.black,.045,q);box(0,.82,.41,.98,.54,.055,M.black,.012,q);const ring=new THREE.Mesh(new THREE.TorusGeometry(.50,.07,20,48),M.brass);ring.position.set(0,-.66,.43);q.add(ring);const cone=new THREE.Mesh(new THREE.CylinderGeometry(.35,.47,.12,48),new THREE.MeshStandardMaterial({color:0x563a28,roughness:.48}));cone.rotation.x=Math.PI/2;cone.position.set(0,-.66,.40);q.add(cone)}
+  speaker(-2.95); speaker(2.95);
+  function deck(x){const q=group(x,2.42,-6.68);box(0,0,0,2.02,.16,.85,M.black,.026,q);const pl=new THREE.Mesh(new THREE.CylinderGeometry(.34,.34,.055,50),M.steel);pl.position.set(-.12,.12,0);q.add(pl);const disk=new THREE.Mesh(new THREE.CylinderGeometry(.31,.31,.018,50),M.black);disk.position.set(-.12,.158,0);q.add(disk)}
+  deck(-1.85); deck(1.85); box(0,2.42,-6.68,1.12,.23,.72,M.black,.025);
+  const logo=tex((x,w,h)=>{x.fillStyle='#102e4d';x.fillRect(0,0,w,h);x.fillStyle='#d7ab72';x.font='600 108px Georgia';x.textAlign='center';x.textBaseline='middle';x.fillText('ODD HAUS',w/2,h/2)},1000,280);
+  const logoMesh=new THREE.Mesh(new THREE.PlaneGeometry(3.8,1.05),new THREE.MeshStandardMaterial({map:logo,roughness:.55})); logoMesh.position.set(0,1.2,-6.40); scene.add(logoMesh);
+
+  // Lounge — centered on axis
+  box(0,.025,-.1,10.4,.04,6.6,M.rug,.004);
+  const sofa=group(0,.58,1.55);
+  box(0,0,0,6.6,1.04,1.58,M.velvet,.2,sofa);
+  box(0,.64,.53,6.6,1.04,.37,M.velvet,.18,sofa);
+  box(-3.07,.50,0,.38,1.10,1.50,M.velvet,.16,sofa);
+  box(3.07,.50,0,.38,1.10,1.50,M.velvet,.16,sofa);
+  for(const [x,z,col] of [[-1.95,.58,0xe6d8c5],[-.7,.55,0x243f64],[.7,.58,0xe6d8c5],[1.95,.57,0x243f64]]) box(x,1.16,z+1.55,.92,.52,.22,new THREE.MeshStandardMaterial({color:col,roughness:.95}),.15);
+  const arm=group(-4.95,.62,1.45); box(0,0,0,1.78,1.18,1.64,M.cream,.24,arm); box(0,.66,.5,1.75,.95,.38,M.cream,.18,arm);
+  box(0,.43,.30,4.0,.38,1.75,M.wood2,.055); // centered coffee table
+  box(-.72,.68,.16,.88,.12,.58,M.cream,.02); box(-.64,.76,.18,.74,.09,.52,M.plaster,.02);
+  const bowl=new THREE.Mesh(new THREE.CylinderGeometry(.2,.28,.12,36),M.brass); bowl.position.set(.55,.69,.18); scene.add(bowl);
+
+  // Right studio — larger and more independent room
+  // partition wall + arch opening effect
+  box(7.0,2.85,-.1,.22,5.7,8.8,M.plaster,.02);
+  box(7.1,2.85,4.25,3.2,5.7,.22,M.plaster,.02);
+  box(7.1,2.85,-4.25,3.2,5.7,.22,M.plaster,.02);
+  // arch trim
+  const arch=new THREE.Group(); arch.position.set(7.02,0,0); scene.add(arch);
+  const archMat=M.wood2;
+  box(0,2.1,0,.34,4.2,.34,archMat,.035,arch); // center trim hidden by wall but keeps arch top continuity
+  box(-1.5,2.1,0,.34,4.2,.34,archMat,.035,arch); box(1.5,2.1,0,.34,4.2,.34,archMat,.035,arch);
+  const arcGeom=new THREE.TorusGeometry(1.5,.17,18,64,Math.PI); const arc=new THREE.Mesh(arcGeom,archMat); arc.rotation.z=Math.PI/2; arc.position.set(0,4.05,0); arc.castShadow=true; scene.add(arc);
+  // studio floor/rug and furniture
+  box(10.4,.01,.8,6.0,.05,8.8,M.rug,.004);
+  box(13.4,2.85,.8,.22,5.7,8.8,M.plaster,.02);
+  box(10.4,2.85,5.2,6.0,5.7,.22,M.plaster,.02);
+  box(10.4,2.85,-3.6,6.0,5.7,.22,M.plaster,.02);
+  // desk pushed right, bookshelf farther back
+  box(11.2,.82,3.4,4.2,.2,1.05,M.wood,.055);
+  box(11.2,1.58,2.8,2.15,.1,.16,M.black,.02);
+  box(10.1,1.06,3.4,.54,.84,.49,M.black,.07); box(12.2,1.06,3.4,.54,.84,.49,M.black,.07);
+  const chair=group(11.2,.6,2.1); box(0,0,0,.78,1.08,.74,new THREE.MeshStandardMaterial({color:0x4c3025,roughness:.72}),.13,chair); box(0,.68,.27,.75,.78,.18,new THREE.MeshStandardMaterial({color:0x4c3025,roughness:.72}),.1,chair);
+  box(9.0,2.25,-.2,1.25,4.3,.60,M.wood,.03); for(let y=.54;y<=4.0;y+=.66) box(9.0,y,.13,1.14,.055,.62,M.wood2,.01); // bookshelf farther from desk
+  box(8.85,.72,2.45,1.8,1.35,.70,M.wood,.04); box(8.85,1.45,2.45,1.4,.12,.66,M.black,.02);
+  const platter=new THREE.Mesh(new THREE.CylinderGeometry(.29,.29,.04,44),M.steel); platter.position.set(8.85,1.55,2.45); scene.add(platter);
+  const studioArm=group(9.0,.62,-1.2); box(0,0,0,1.58,1.18,1.58,M.cream,.22,studioArm); box(0,.64,.48,1.54,.92,.36,M.cream,.17,studioArm); box(10.15,.4,-1.1,.82,.4,.82,M.wood2,.08);
+
+  // Rear LP library — farther back, larger breathing space
+  box(2.3,2.25,9.0,13.4,4.45,.66,M.wood,.03);
+  for(let yy=.58; yy<=3.98; yy+=.82) box(2.3,yy,8.62,12.95,.075,.72,M.wood2,.01);
+  for(let xx=-3.8; xx<=8.4; xx+=1.24) box(xx,2.17,8.61,.06,4.23,.72,M.wood2,.01);
+  for(let ix=0; ix<10; ix++) for(let iy=0; iy<5; iy++) if((ix+iy)%4!==1) box(-3.2+ix*1.23,.78+iy*.82,8.22,.12,.58,.36,new THREE.MeshStandardMaterial({color:[0x4a3f35,0x815f47,0x394a52,0x83513f][(ix+iy)%4],roughness:.92}),.01);
+  box(2.1,.82,5.0,8.8,.3,1.92,M.wood2,.06); for(const xx of [-1.2,.9,3.0,5.2]) box(xx,.37,5.0,.22,.79,.22,M.wood,.03);
+  for(let i=0;i<8;i++){const q=group(-1.8+i*1.05,.52,3.70); box(0,0,0,.54,.7,.54,M.wood2,.075,q); box(0,.54,.2,.54,.6,.1,M.wood2,.04,q)}
+  for(let i=0;i<8;i++){const q=group(-1.8+i*1.05,.52,6.28); box(0,0,0,.54,.7,.54,M.wood2,.075,q); box(0,.54,-.2,.54,.6,.1,M.wood2,.04,q)}
+  const lanternMat=new THREE.MeshPhysicalMaterial({color:0xf1dfc0,roughness:.75,transmission:.14,emissive:0x704a2d,emissiveIntensity:.18});
+  const lantern=new THREE.Mesh(new THREE.SphereGeometry(.86,42,22),lanternMat); lantern.scale.y=1.08; lantern.position.set(2.1,3.92,5.0); scene.add(lantern);
+
+  // Reference products placed appropriately
+  const battery=group(8.55,1.95,1.65); box(0,0,0,1.10,.82,.86,M.amber,.12,battery); box(0,.47,0,1.03,.16,.82,M.amber,.08,battery);
+  const tool=group(12.55,.55,-2.2); box(0,0,0,1.85,.70,.67,M.steel,.06,tool); box(0,.45,0,1.76,.17,.64,M.steel,.055,tool);
+  const picker=group(10.75,.72,-.25); box(0,0,0,1.00,.2,.74,M.steel,.055,picker); box(-.75,.18,.02,.52,.76,.44,M.steel,.055,picker);
+
+  // Plants — simplified but more edge-oriented
+  const leafShape=new THREE.Shape(); leafShape.moveTo(0,0); leafShape.bezierCurveTo(.2,.12,.34,.43,0,.76); leafShape.bezierCurveTo(-.34,.43,-.2,.12,0,0); const leafGeo=new THREE.ShapeGeometry(leafShape);
+  function plant(x,z,s=1,type='tree'){const q=group(x,0,z);const pot=new THREE.Mesh(new THREE.CylinderGeometry(.34*s,.46*s,.56*s,28),M.pot); pot.position.y=.28*s; pot.castShadow=true; q.add(pot); if(type==='tree'){const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.055*s,.085*s,2.6*s,12),M.trunk); trunk.position.y=1.68*s; trunk.castShadow=true; q.add(trunk); for(let b=0;b<7;b++){const a=(b/7)*Math.PI*2; const branch=new THREE.Mesh(new THREE.CylinderGeometry(.02*s,.04*s,1.05*s,8),M.trunk); branch.position.set(Math.cos(a)*.2*s,2.15*s+b*.06*s,Math.sin(a)*.2*s); branch.rotation.z=Math.PI*.34; branch.rotation.y=-a; q.add(branch); for(let j=0;j<5;j++){const leaf=new THREE.Mesh(leafGeo,(j+b)%2?M.leaf1:M.leaf2); leaf.scale.set(.72*s,.72*s,.72*s); leaf.position.set(Math.cos(a)*(.58+j*.06)*s,2.28*s+(j%3)*.2*s,Math.sin(a)*(.58+j*.06)*s); leaf.rotation.set(-.5+(j%2)*.18,a+.45*j,.18*(j-2)); q.add(leaf)}}} else {for(let i=0;i<13;i++){const a=-1.7+i*.28; const stem=new THREE.Mesh(new THREE.CylinderGeometry(.016*s,.024*s,1.65*s,8),M.leaf1); stem.position.set(Math.sin(a)*.18*s,1.05*s,Math.cos(a)*.16*s); stem.rotation.z=(i-6)*.05; q.add(stem); const leaf=new THREE.Mesh(leafGeo,i%2?M.leaf1:M.leaf2); leaf.scale.set(1.05*s,.98*s,1); leaf.position.set(Math.sin(a)*.55*s,1.7*s+(i%4)*.12*s,Math.cos(a)*.5*s); leaf.rotation.set(-.6,a,.25*Math.sin(i)); q.add(leaf)}}}
+  [[-12.1,5.9,1,'tree'],[-10.0,5.2,.85,'broad'],[-11.4,-.6,.72,'broad'],[-8.0,4.5,.86,'tree'],[6.7,7.2,1.0,'tree'],[7.85,2.6,.74,'broad'],[12.45,-2.1,.80,'tree'],[8.2,-1.85,.68,'broad'],[13.0,4.2,.76,'broad']].forEach(p=>plant(...p));
+
+  // Lights
+  scene.add(new THREE.HemisphereLight(0xffe2bf,0x211916,1.45));
+  const sun=new THREE.DirectionalLight(0xffc381,4.3); sun.position.set(-15,16,14); sun.castShadow=true; sun.shadow.mapSize.set(2048,2048); sun.shadow.camera.left=-22; sun.shadow.camera.right=22; sun.shadow.camera.top=22; sun.shadow.camera.bottom=-22; scene.add(sun);
+  [[0,3.95,-6.25,28,9],[2.1,4.05,5.1,24,10],[10.9,3.2,1.8,18,8],[8.85,2.7,-1.0,12,6],[-10.5,3.0,3.0,10,7]].forEach(([x,y,z,p,d])=>{const l=new THREE.PointLight(0xffad67,p,d,1.7); l.position.set(x,y,z); scene.add(l)});
+
+  // labels
+  const layer=document.createElement('div'); layer.style.position='absolute'; layer.style.inset='0'; layer.style.pointerEvents='none'; mount.appendChild(layer);
+  const labelData=[['DJ BOOTH',new THREE.Vector3(0,3.1,-6.5)],['LOUNGE',new THREE.Vector3(0,1.55,.4)],['STUDIO',new THREE.Vector3(10.4,2.6,1.1)],['LP LIBRARY',new THREE.Vector3(2.3,3.55,8.4)],['COMMUNITY TABLE',new THREE.Vector3(2.1,1.55,5.0)],['COURTYARD',new THREE.Vector3(-11.0,1.6,2.8)]].map(([name,pos])=>{const e=document.createElement('div'); e.className='label'; e.textContent=name; layer.appendChild(e); return {name,pos,e}});
+  function projectLabels(){const r=mount.getBoundingClientRect(); labelData.forEach(o=>{const p=o.pos.clone().project(camera); o.e.style.display=(p.z>-1&&p.z<1)?'block':'none'; o.e.style.left=((p.x*.5+.5)*r.width)+'px'; o.e.style.top=((-p.y*.5+.5)*r.height)+'px'})}
+
+  const views={
+    all:{p:[20,15.2,28],t:[0,1.5,1.3],s:'전체 공간'},
+    dj:{p:[5.2,4.9,8.2],t:[0,1.8,-6.6],s:'DJ 부스'},
+    lounge:{p:[8.4,4.6,10.2],t:[0,1.1,.8],s:'중앙 정렬 라운지'},
+    studio:{p:[16.5,5.8,8.6],t:[10.5,1.8,1.2],s:'확장 스튜디오'},
+    library:{p:[13.0,7.2,18.5],t:[2.1,1.8,6.5],s:'LP 라이브러리 / 넓어진 동선'},
+    terrace:{p:[-3.6,4.8,13.5],t:[-11.0,1.15,2.7],s:'테라스'}
+  };
+  const target={p:new THREE.Vector3(),t:new THREE.Vector3(),on:false};
+  function go(v){target.p.set(...v.p); target.t.set(...v.t); target.on=true; status.textContent=v.s}
+  document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>go(views[b.dataset.view])));
+  document.getElementById('topView').addEventListener('click',()=>go({p:[1,26,15],t:[0,0,1],s:'평면 보기'}));
+  document.getElementById('resetView').addEventListener('click',()=>go(views.all));
+  let labels=true; document.getElementById('labelToggle').addEventListener('click',e=>{labels=!labels; layer.style.display=labels?'block':'none'; e.currentTarget.textContent=labels?'공간명 표시':'공간명 숨김'});
+
+  function resize(){const r=mount.getBoundingClientRect(); if(r.width<2||r.height<2) return; camera.aspect=r.width/r.height; camera.updateProjectionMatrix(); renderer.setSize(r.width,r.height,false)}
+  new ResizeObserver(resize).observe(mount); resize();
+  function tick(){requestAnimationFrame(tick); if(target.on){camera.position.lerp(target.p,.07); controls.target.lerp(target.t,.07); if(camera.position.distanceTo(target.p)<.04) target.on=false;} controls.update(); projectLabels(); renderer.render(scene,camera)}
+  tick(); load.style.display='none';
+ }catch(e){console.error(e); load.style.display='none'; fail.style.display='flex'}
+})();
+</script>
+</body>
+</html>
